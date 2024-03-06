@@ -1,3 +1,4 @@
+mod decrypt;
 use anyhow::{Result, *};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
@@ -84,12 +85,6 @@ fn main() -> Result<()> {
         .chunks(16)
         .map(|chunk| chunk.to_vec())
         .collect();
-
-    if let Some(iv) = &args.iv {
-        let mut iv =
-            BASE64_STANDARD.decode(iv.replace('~', "=").replace('!', "/").replace('-', "+"))?;
-        println!("IV: {:?}", iv);
-    }
 
     chunks
         .iter()
