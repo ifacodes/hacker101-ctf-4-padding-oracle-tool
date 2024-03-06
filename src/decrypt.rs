@@ -2,6 +2,7 @@ use std::{process::Output, thread::JoinHandle};
 
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine};
+use reqwest::Client;
 
 static CHUNK_SIZE: usize = 16;
 
@@ -14,23 +15,36 @@ trait ModBase64 {
 fn decrypt() -> Result<()> {
     let ciphertext = "";
     let url = "";
+    let client = Client::new();
 
-    for chunk in BASE64_STANDARD
+    for (n, chunks) in BASE64_STANDARD
         .decode(ciphertext.fix_base64())?
-        .chunks(CHUNK_SIZE)
+        .chunks(CHUNK_SIZE * 2)
+        .enumerate()
+        .rev()
         .skip(1)
     {
-        let intermediate = [0u8; 16];
-        (1..=CHUNK_SIZE as u8).for_each(|chunk| {
-            let handles: Vec<JoinHandle<Option<u8>>> = vec![];
-            (0u8..=255).for_each(|value| {})
-        })
+        println!("chunk #: {}", n);
+        let mut intermediate = [0u8; 16];
+
+        for byte in 1..=CHUNK_SIZE {
+            println!("byte #: {}", byte);
+
+            for value in 0u8..=255 {
+                std::thread::scope(|s| {
+                    s.spawn(|| {
+                        intermediate.clone_from_slice(&chunks[0..CHUNK_SIZE]);
+                        intermediate[16 - byte] = value;
+                    });
+                });
+            }
+        }
     }
 
     Ok(())
 }
 
-fn test_byte() {}
+fn test_byte(client: &Client) {}
 
 impl ModBase64 for &str {
     type Output = String;

