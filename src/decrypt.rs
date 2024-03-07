@@ -2,6 +2,7 @@ use std::{process::Output, thread::JoinHandle};
 
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine};
+use rayon::prelude::*;
 use reqwest::Client;
 
 static CHUNK_SIZE: usize = 16;
@@ -16,30 +17,31 @@ fn decrypt() -> Result<()> {
     let ciphertext = "";
     let url = "";
     let client = Client::new();
+    let ciphertext = BASE64_STANDARD.decode(ciphertext.fix_base64())?;
 
-    for (n, chunks) in BASE64_STANDARD
-        .decode(ciphertext.fix_base64())?
-        .chunks(CHUNK_SIZE * 2)
-        .enumerate()
-        .rev()
-        .skip(1)
-    {
-        println!("chunk #: {}", n);
-        let mut intermediate = [0u8; 16];
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(10)
+        .build()
+        .unwrap()
+        .install(|| {
+            for (n, chunks) in ciphertext.chunks(CHUNK_SIZE * 2).enumerate().rev().take(1) {
+                println!("chunk #: {}", n);
 
-        for byte in 1..=CHUNK_SIZE {
-            println!("byte #: {}", byte);
+                for byte in 1..=CHUNK_SIZE {
+                    println!("byte #: {}", byte);
 
-            for value in 0u8..=255 {
-                std::thread::scope(|s| {
-                    s.spawn(|| {
-                        intermediate.clone_from_slice(&chunks[0..CHUNK_SIZE]);
-                        intermediate[16 - byte] = value;
-                    });
-                });
+                    (0u8..=255)
+                        .into_par_iter()
+                        .map(|value| {
+                            let mut intermediate: [u8; 16] =
+                                chunks[0..CHUNK_SIZE].try_into().unwrap();
+                            intermediate[16 - byte] = value;
+                            intermediate
+                        })
+                        .find_any(|intermediate| intermediate[0] == 0);
+                }
             }
-        }
-    }
+        });
 
     Ok(())
 }
