@@ -23,7 +23,7 @@ pub fn decrypt(url: String, ciphertext: &str) -> Result<()> {
     let client = Client::new();
     let ciphertext = BASE64_STANDARD.decode(ciphertext.fix_base64())?;
     rayon::ThreadPoolBuilder::new()
-        .num_threads(16)
+        .num_threads(64)
         .build()
         .unwrap()
         .install(|| {
@@ -55,7 +55,7 @@ pub fn decrypt(url: String, ciphertext: &str) -> Result<()> {
                             // println!("{} {byte} {cipherblock:x?}", n / CHUNK_SIZE);
                             bar.inc(1);
                             if !text.contains("PaddingException") {
-                                bar.println(format!("{text}"));
+                                bar.println(&text);
                                 if text.contains("UnicodeDecodeError")
                                     || text.contains("ValueError")
                                     || byte != 1
