@@ -74,7 +74,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let client = Arc::new(Client::new());
+    let client = Client::new();
     let mut chunks: Vec<Vec<u8>> = BASE64_STANDARD
         .decode(
             args.base64
@@ -93,7 +93,7 @@ fn main() -> Result<()> {
     let orig_chunks = chunks.clone();
     let len = chunks.len();
     let mut plaintext: Vec<Vec<u8>> = vec![];
-    let url = Arc::new(args.url.clone());
+    let url = &args.url;
 
     let finished = Arc::new((Mutex::new(None::<u8>), Condvar::new()));
     let generation = Mutex::new(1u8);
@@ -108,13 +108,12 @@ fn main() -> Result<()> {
                 let mut handles = vec![];
                 let semaphore = Arc::new(Semaphore::new(30));
                 for b in 0u8..=255 {
-                    let url = url.clone();
                     let mut chunks = chunks.clone();
-                    let client = client.clone();
+                    let client = &client;
                     let semaphore = semaphore.clone();
                     let finished = finished.clone();
                     let generation = &generation;
-                    let orig_chunks = orig_chunks.clone();
+                    let orig_chunks = &orig_chunks;
                     let handle = scope.spawn(move || {
                         chunks[len - chunk][16 - i as usize] = b;
                         if chunks[len - chunk] == orig_chunks[len - chunk] {
