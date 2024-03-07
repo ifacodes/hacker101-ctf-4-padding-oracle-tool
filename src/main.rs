@@ -2,6 +2,7 @@ mod decrypt;
 use anyhow::{Result, *};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use clap::Parser;
+use decrypt::decrypt;
 use reqwest::{blocking::Client, Url};
 use std::{
     io::{self, Write},
@@ -70,14 +71,15 @@ fn main() -> Result<()> {
     println!("{args:#?}");
 
     if args.new {
-        output_new_package(&args);
+        decrypt(args.url.to_string(), &args.base64)?;
         return Ok(());
     }
 
     let client = Client::new();
     let mut chunks: Vec<Vec<u8>> = BASE64_STANDARD
         .decode(
-            args.base64
+            &args
+                .base64
                 .replace('~', "=")
                 .replace('!', "/")
                 .replace('-', "+"),
