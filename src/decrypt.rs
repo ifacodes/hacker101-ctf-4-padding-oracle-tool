@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::Result;
 use base64::{prelude::BASE64_STANDARD, Engine};
+use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use reqwest::{blocking::Client, Url};
 
@@ -26,6 +27,11 @@ pub fn decrypt(url: String, ciphertext: &str) -> Result<()> {
         .build()
         .unwrap()
         .install(|| {
+            let bar = ProgressBar::new((ciphertext.len() * 256 / 2) as u64);
+            bar.set_style(
+                ProgressStyle::with_template("{wide_bar} {pos}/{len} {per_sec} {eta_precise}")
+                    .unwrap(),
+            );
             let mut plaintext: Vec<Vec<u8>> = ciphertext
                 .par_windows(CHUNK_SIZE * 2)
                 .enumerate()
@@ -46,9 +52,10 @@ pub fn decrypt(url: String, ciphertext: &str) -> Result<()> {
                             let res = client.get(&url).query(&[("post", encoded)]).send().unwrap();
                             let text = res.text().unwrap();
 
-                            println!("{} {byte} {cipherblock:x?}", n / CHUNK_SIZE);
+                            // println!("{} {byte} {cipherblock:x?}", n / CHUNK_SIZE);
+                            bar.inc(1);
                             if !text.contains("PaddingException") {
-                                println!("{text}");
+                                bar.println(format!("{text}"));
                                 if text.contains("UnicodeDecodeError")
                                     || text.contains("ValueError")
                                     || byte != 1
