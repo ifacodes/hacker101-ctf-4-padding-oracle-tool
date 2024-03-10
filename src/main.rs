@@ -2,15 +2,12 @@ mod decrypt;
 mod encrypt;
 mod shared;
 use anyhow::{Result, *};
-use base64::{prelude::BASE64_STANDARD, Engine};
+
 use clap::Parser;
 use decrypt::decrypt;
 use encrypt::encrypt;
-use reqwest::{blocking::Client, Url};
-use std::{
-    io::{self, Write},
-    sync::{Arc, Condvar, Mutex},
-};
+use reqwest::{Url};
+
 
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
